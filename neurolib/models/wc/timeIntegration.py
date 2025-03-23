@@ -192,7 +192,7 @@ def timeIntegration_njit_elementwise(
 ):
     ### integrate ODE system:
 
-    def S_E(x):
+    def S_E(x): #the sigmoid function of excitatory neurons
         return 1.0 / (1.0 + np.exp(-a_exc * (x - mu_exc)))
 
     def S_I(x):
@@ -211,8 +211,8 @@ def timeIntegration_njit_elementwise(
             for l in range(N):
                 exc_input_d[no] += K_gl * Cmat[no, l] * (excs[l, i - Dmat_ndt[no, l] - 1])
 
-            # Wilson-Cowan model
-            exc_rhs = (
+            # Wilson-Cowan model 
+            exc_rhs = ( #rhs: right-hand side, which is the calculation of dx
                 1
                 / tau_exc
                 * (
@@ -243,6 +243,8 @@ def timeIntegration_njit_elementwise(
                     + inh_ou[no]  # ou noise
                 )
             )
+            # update of c_excinh
+            #c_excinh = c_excinh + 0.001
 
             # Euler integration
             excs[no, i] = excs[no, i - 1] + dt * exc_rhs
