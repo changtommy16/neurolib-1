@@ -198,7 +198,7 @@ def timeIntegration_njit_elementwise(
     def S_I(x):
         return 1.0 / (1.0 + np.exp(-a_inh * (x - mu_inh)))
 
-    for i in range(startind, startind + len(t)):
+    for i in range(startind, startind + len(t)): #loop through time with i
         # loop through all the nodes
         for no in range(N):
             # To save memory, noise is saved in the activity array
@@ -244,8 +244,9 @@ def timeIntegration_njit_elementwise(
                 )
             )
             # update of c_excinh
-            #c_excinh = c_excinh + 0.001
-
+            #if (i-startind)> 999:
+            #    c_excinh = c_excinh + 0.001
+            # test for git
             # Euler integration
             excs[no, i] = excs[no, i - 1] + dt * exc_rhs
             inhs[no, i] = inhs[no, i - 1] + dt * inh_rhs

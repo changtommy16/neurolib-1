@@ -31,7 +31,7 @@ def loadDefaultParams(Cmat=None, Dmat=None, seed=None):
 
     # signal transmission speed between areas
     params.signalV = 20.0
-    params.K_gl = 0.6  # global coupling strength
+    params.K_gl = 2.067592021834819  # global coupling strength (modified based Kaan)
 
     if Cmat is None:
         params.N = 1
