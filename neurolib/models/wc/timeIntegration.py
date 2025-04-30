@@ -243,10 +243,16 @@ def timeIntegration_njit_elementwise(
                     + inh_ou[no]  # ou noise
                 )
             )
+            ''' PART for adjusting time-dependent stimulus!!!!'''
             # update of c_excinh
             #if (i-startind)> 999:
             #    c_excinh = c_excinh + 0.001
-            # test for git
+            # For exporation 3
+            if (i-startind) > 60000:
+                inh_ext_baseline = inh_ext_baseline + 3
+            if (i-startind) > 30000 and (i-startind) < 60000:
+                exc_ext_baseline = inh_ext_baseline + 1
+
             # Euler integration
             excs[no, i] = excs[no, i - 1] + dt * exc_rhs
             inhs[no, i] = inhs[no, i - 1] + dt * inh_rhs
