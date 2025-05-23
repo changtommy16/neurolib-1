@@ -114,6 +114,15 @@ def timeIntegration(params):
     noise_inh = np.zeros((N,))
 
     # ------------------------------------------------------------------------
+    # ECT phase parameters (if present)
+    ect_ictal_start = params.get('ect_ictal_start', -1)
+    ect_ictal_duration = params.get('ect_ictal_duration', 0)
+    ect_ictal_exc_increase = params.get('ect_ictal_exc_increase', 0)
+    
+    ect_postictal_start = params.get('ect_postictal_start', -1)
+    ect_postictal_duration = params.get('ect_postictal_duration', 0)
+    ect_postictal_exc_decrease = params.get('ect_postictal_exc_decrease', 0)
+    ect_postictal_inh_increase = params.get('ect_postictal_inh_increase', 0)
 
     return timeIntegration_njit_elementwise(
         startind,
@@ -150,6 +159,13 @@ def timeIntegration(params):
         inh_ou_mean,
         tau_ou,
         sigma_ou,
+        ect_ictal_start,
+        ect_ictal_duration,
+        ect_ictal_exc_increase,
+        ect_postictal_start,
+        ect_postictal_duration,
+        ect_postictal_exc_decrease,
+        ect_postictal_inh_increase,
     )
 
 
@@ -189,6 +205,13 @@ def timeIntegration_njit_elementwise(
     inh_ou_mean,
     tau_ou,
     sigma_ou,
+    ect_ictal_start,
+    ect_ictal_duration,
+    ect_ictal_exc_increase,
+    ect_postictal_start,
+    ect_postictal_duration,
+    ect_postictal_exc_decrease,
+    ect_postictal_inh_increase,
 ):
     ### integrate ODE system:
 
@@ -211,6 +234,26 @@ def timeIntegration_njit_elementwise(
             for l in range(N):
                 exc_input_d[no] += K_gl * Cmat[no, l] * (excs[l, i - Dmat_ndt[no, l] - 1])
 
+            # Calculate current time for ECT phases
+            current_time = (i - startind) * dt
+            
+            # Start with default baselines
+            current_exc_baseline = exc_ext_baseline
+            current_inh_baseline = inh_ext_baseline
+            
+            # Ictal phase: Set excitatory baseline to increased value
+            if (ect_ictal_start >= 0 and 
+                current_time >= ect_ictal_start and 
+                current_time < ect_ictal_start + ect_ictal_duration):
+                current_exc_baseline = exc_ext_baseline + ect_ictal_exc_increase
+            
+            # Postictal phase: Set baselines to modified values
+            if (ect_postictal_start >= 0 and 
+                current_time >= ect_postictal_start and 
+                current_time < ect_postictal_start + ect_postictal_duration):
+                current_exc_baseline = exc_ext_baseline + ect_postictal_exc_decrease
+                current_inh_baseline = inh_ext_baseline + ect_postictal_inh_increase
+
             # Wilson-Cowan model 
             exc_rhs = ( #rhs: right-hand side, which is the calculation of dx
                 1
@@ -222,7 +265,7 @@ def timeIntegration_njit_elementwise(
                         c_excexc * excs[no, i - 1]  # input from within the excitatory population
                         - c_inhexc * inhs[no, i - 1]  # input from the inhibitory population
                         + exc_input_d[no]  # input from other nodes
-                        + exc_ext_baseline  # baseline external input (static)
+                        + current_exc_baseline  # baseline external input (potentially modified by ECT phases)
                         + exc_ext[no, i - 1]  # time-dependent external input
                     )
                     + exc_ou[no]  # ou noise
@@ -237,21 +280,12 @@ def timeIntegration_njit_elementwise(
                     * S_I(
                         c_excinh * excs[no, i - 1]  # input from the excitatory population
                         - c_inhinh * inhs[no, i - 1]  # input from within the inhibitory population
-                        + inh_ext_baseline  # baseline external input (static)
+                        + current_inh_baseline  # baseline external input (potentially modified by ECT phases)
                         + inh_ext[no, i - 1]  # time-dependent external input
                     )
                     + inh_ou[no]  # ou noise
                 )
             )
-            ''' PART for adjusting time-dependent stimulus!!!!'''
-            # update of c_excinh
-            #if (i-startind)> 999:
-            #    c_excinh = c_excinh + 0.001
-            # For exporation 3
-            if (i-startind) > 60000:
-                inh_ext_baseline = inh_ext_baseline + 3
-            if (i-startind) > 30000 and (i-startind) < 60000:
-                exc_ext_baseline = inh_ext_baseline + 1
 
             # Euler integration
             excs[no, i] = excs[no, i - 1] + dt * exc_rhs
