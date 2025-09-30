@@ -48,24 +48,26 @@ class WendlingModel(Model):
 
     # ---- Default parameters ----
     params = dict(
-        # Synaptic gains & time constants (Wendling 2002)
-        A=5.0,    a=100.0,
-        B=25.0,   b=25.0,
-        G=15.0,   g=500.0,
+        # Synaptic gains & time constants (Arrais 2019 TABLE I)
+        A=5.0,    a=100.0,   # Excitatory: A ∈ [0.1, 10] mV
+        B=25.0,   b=30.0,    # Slow inhibitory: B ∈ [0.1, 50] mV, b = 30 s⁻¹
+        G=20.0,   g=350.0,   # Fast inhibitory: G ∈ [20, 50] mV, g = 350 s⁻¹
 
         # Connectivity
         C=135.0,
         C1=1.0, C2=0.8, C3=0.25, C4=0.25, C5=0.3, C6=0.1, C7=0.8,
 
-        # Sigmoid
+        # Sigmoid (Arrais 2019 formulation)
         e0=2.5, v0=6.0, r=0.56,
+        S=0.0,  # Sigmoid offset parameter (S in Arrais 2019)
 
-        # Background input p(t) = p_mean + p_sigma * N(0,1) * sqrt(dt)
+        # Background input p(t) = p_mean + p_std * N(0,1)
+        # Arrais 2019 uses p_mean=90, p_std=30
         p_mean=90.0,   # Hz
-        p_sigma=2,  # Hz (先這樣；必要時微調)
+        p_sigma=30.0,  # Hz (standard deviation of noise)
 
         # Integration
-        dt=0.0001,     # 10 kHz（←註解已改正）
+        dt=0.0001,     # 10 kHz
         duration=50.0,
         seed=None,
     )
@@ -123,49 +125,64 @@ class WendlingModel(Model):
 # ---------- Numba-accelerated core ----------
 
 @njit(cache=True, fastmath=True)
-def _sigm(v, e0, v0, r):
-    # Standard JR/Wendling sigmoid -> firing rate (Hz)
-    return 2.0 * e0 / (1.0 + np.exp(r * (v0 - v)))
+def _sigm(v, e0, v0, r, S):
+    # Arrais 2019 sigmoid with offset S: Sig(S + v)
+    return 2.0 * e0 / (1.0 + np.exp(r * (v0 - (S + v))))
 
 
 @njit(cache=True, fastmath=True)
 def _integrate_wendling(y0, n_steps, dt,
                         A,a, B,b, G,g,
                         C,C1,C2,C3,C4,C5,C6,C7,
-                        e0,v0,r, p_mean, p_sigma):
+                        e0,v0,r,S, p_mean, p_sigma):
     ys = np.zeros((10, n_steps), dtype=np.float64)
     y = y0.copy()
 
     for k in range(n_steps):
-        # State variables following github_wendling.py structure
-        y0_,y1,y2,y3,y4, y5,y6,y7,y8,y9 = y
+        # State variables: y0-y4 are potentials, dy0-dy4 are velocities (first derivatives)
+        y0_, y1, y2, y3, y4, dy0, dy1, dy2, dy3, dy4 = y
         
         # Background input: p(t) in Hz
         # Gaussian white noise input: p(t) = p_mean + p_sigma * ξ(t) where ξ(t) ~ N(0,1)
         # For Euler-Maruyama integration of SDEs, the noise term is scaled by sqrt(dt)
         xi_t = np.random.normal(0.0, 1.0)  # Standard Gaussian random variable ξ(t) ~ N(0,1)
-        p_t = p_mean + p_sigma * xi_t * np.sqrt(dt)  # Proper Gaussian white noise scaling
+        p_t = p_mean + p_sigma * xi_t #* np.sqrt(dt)  # Proper Gaussian white noise scaling
         
-        # Derivatives following github_wendling.py exactly
-        dy0 = y5
-        dy5 = A * a * _sigm(y1-y2-y3, e0, v0, r) - 2.0 * a * y5 - a * a * y0_
+        # Derivatives following Arrais 2019 formulation:
+        # ÿ0(t) = Aa*Sig(S + y1 − y2 − y3) − 2a*ẏ0(t) − a²*y0(t)
+        ddy0 = A * a * _sigm(y1-y2-y3, e0, v0, r, S) - 2.0 * a * dy0 - a * a * y0_  # Second derivative (acceleration)
         
-        dy1 = y6
-        dy6 = A * a * (C2 * _sigm(C1 * y0_, e0, v0, r) + p_t) - 2.0 * a * y6 - a * a * y1
+        # ÿ1(t) = Aa{p(t) + Sig(S + C1*y0)} − 2a*ẏ1(t) − a²*y1(t)
+        # Note: No C2 coefficient in Arrais 2019
+        ddy1 = A * a * (p_t + C2*_sigm(C1 * y0_, e0, v0, r, S)) - 2.0 * a * dy1 - a * a * y1
         
-        dy2 = y7
-        dy7 = B * b * (C4 * _sigm(C3 * y0_, e0, v0, r)) - 2.0 * b * y7 - b * b * y2
+        # ÿ2(t) = Bb*C4*Sig(S + C3*y0) − 2b*ẏ2(t) − b²*y2(t)
+        ddy2 = B * b * C4 * _sigm(C3 * y0_, e0, v0, r, S) - 2.0 * b * dy2 - b * b * y2
         
-        dy3 = y8
-        dy8 = G * g * (C7 * _sigm((C5 * y0_ - C6 * y4), e0, v0, r)) - 2.0 * g * y8 - g * g * y3
+        # ÿ3(t) = Gg*C7*Sig(S + C5*y0 − y4) − 2g*ẏ3(t) − g²*y3(t)
+        ddy3 = G * g * C7 * _sigm(C5 * y0_ - C6*y4, e0, v0, r, S) - 2.0 * g * dy3 - g * g * y3
         
-        dy4 = y9
-        dy9 = B * b * (_sigm(C3 * y0_, e0, v0, r)) - 2.0 * b * y9 - b * b * y4
+        # ÿ4(t) = Bb*C6*Sig(S + C3*y0) − 2b*ẏ4(t) − b²*y4(t)
+        ddy4 = B * b * _sigm(C3 * y0_, e0, v0, r, S) - 2.0 * b * dy4 - b * b * y4
         
-        # Euler integration
-        y0_ += dt*dy0; y1 += dt*dy1; y2 += dt*dy2; y3 += dt*dy3; y4 += dt*dy4
-        y5  += dt*dy5; y6 += dt*dy6; y7 += dt*dy7; y8 += dt*dy8; y9 += dt*dy9
-        y[0]=y0_; y[1]=y1; y[2]=y2; y[3]=y3; y[4]=y4; y[5]=y5; y[6]=y6; y[7]=y7; y[8]=y8; y[9]=y9
+        # Euler integration (following Arrais 2019 guide)
+        # Step 1: Update velocities (dy_i) using accelerations (ddy_i)
+        dy0 += dt * ddy0  # ẏ0 += ÿ0 * dt
+        dy1 += dt * ddy1  # ẏ1 += ÿ1 * dt
+        dy2 += dt * ddy2  # ẏ2 += ÿ2 * dt
+        dy3 += dt * ddy3  # ẏ3 += ÿ3 * dt
+        dy4 += dt * ddy4  # ẏ4 += ÿ4 * dt
+        
+        # Step 2: Update potentials (y_i) using velocities (dy_i)
+        y0_ += dt * dy0  # y0 += ẏ0 * dt
+        y1  += dt * dy1  # y1 += ẏ1 * dt
+        y2  += dt * dy2  # y2 += ẏ2 * dt
+        y3  += dt * dy3  # y3 += ẏ3 * dt
+        y4  += dt * dy4  # y4 += ẏ4 * dt
+        
+        # Update state vector
+        y[0] = y0_; y[1] = y1;  y[2] = y2;  y[3] = y3;  y[4] = y4
+        y[5] = dy0; y[6] = dy1; y[7] = dy2; y[8] = dy3; y[9] = dy4
         
         
         # Store all state variables
@@ -204,13 +221,13 @@ def timeIntegration(params):
     C6_scaled = params["C6"] * params["C"]
     C7_scaled = params["C7"] * params["C"]
     
-    # Call the numba-accelerated integration function
+    # Call the numba-accelerated integration function (Arrais 2019 formulation)
     ys = _integrate_wendling(
         y0=y,
         n_steps=n_steps, dt=params["dt"],
         A=params["A"], a=params["a"], B=params["B"], b=params["b"], G=params["G"], g=params["g"],
         C=params["C"], C1=C1_scaled, C2=C2_scaled, C3=C3_scaled, C4=C4_scaled, C5=C5_scaled, C6=C6_scaled, C7=C7_scaled,
-        e0=params["e0"], v0=params["v0"], r=params["r"],
+        e0=params["e0"], v0=params["v0"], r=params["r"], S=params["S"],
         p_mean=params["p_mean"], p_sigma=params["p_sigma"],
     )
 
