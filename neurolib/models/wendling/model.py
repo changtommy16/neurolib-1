@@ -1,174 +1,135 @@
-# -*- coding: utf-8 -*-
-"""
-Single-node Wendling–Chauvel neural mass (10D) as a neurolib.Model
-- Populations: PY (pyramidal), EX (excitatory), SI (slow inh), FI (fast inh)
-- Second-order PSP filters per pathway; sigmoid firing-rate
-- Pure Wendling 2002 model
-"""
 import numpy as np
 from numba import njit
 from neurolib.models.model import Model
 
-
-class WendlingModel(Model):
+class Wendling2005(Model):
     """
-    Minimal single-node Wendling model in neurolib 'Model' style.
-    Outputs:
-      - t: time vector
-      - state: (T, 10) full state trajectory
-      - v: pyramidal dendritic potential v_pyr = y1 - y2 - y3
-      - rate: pyramidal firing rate S(v_pyr)
-    """
-    
-    name = "wendling"
-    description = "Wendling neural mass model"
-    
-    # ---- Required metadata for neurolib.Model ----
-    state_vars = ["y0","y1","y2","y3","y4", "y5","y6","y7","y8","y9"]  # 10D
-    init_vars  = ["init_state"]
-    output_vars = ["y0","y1","y2","y3","y4", "y5","y6","y7","y8","y9"]  # Only state variables
-    default_output = "v"
+    Wendling 2005 model of interictal to ictal transition in temporal lobe epilepsy.
 
-    def __init__(self, params=None):
-        """Initialize WendlingModel, ensuring user parameters are merged with defaults."""
+    This model is based on the paper:
+    Wendling F, Hernandez A, Bellanger JJ, Chauvel P, Bartolomei F.
+    Interictal to ictal transition in human temporal lobe epilepsy:
+    insights from a computational model of intracerebral EEG.
+    J Clin Neurophysiol. 2005 Oct;22(5):343-56.
+    """
+
+    name = "Wendling2005"
+    description = "Wendling 2005 model of temporal lobe epilepsy"
+
+    # Default parameters from the C code
+    default_parameters = {
+        "A": 3.5,       # EXC Parameter (excitation)
+        "B": 20.0,      # SDI Parameter (slow dendritic inhibition)
+        "G": 15.0,      # FSI Parameter (fast somatic inhibition)
+        "a": 100.0,     # time constants of EPSPs and IPSPs
+        "b": 50.0,
+        "g": 500.0,
+        "v0": 6.0,      # Sigmoid parameters
+        "e0": 2.5,
+        "r": 0.56,
+        "C": 135.0,     # Global connectivity constant
+        "C1_frac": 1.0,   # Connectivity fractions to be multiplied by C
+        "C2_frac": 0.8,
+        "C3_frac": 0.25,
+        "C4_frac": 0.25,
+        "C5_frac": 0.3,
+        "C6_frac": 0.1,
+        "C7_frac": 0.8,
+        "meanP": 3.0,     # Input noise parameters: mean
+        "sigmaP": 1.0,    # Input noise parameters: standard deviation
+        "coefMultP": 30.0 # Input noise parameters: coefficient multiplier
+    }
+
+    state_vars = [
+        "y0", "y1", "y2", "y3", "y4", # Potentials
+        "y5", "y6", "y7", "y8", "y9"  # Derivatives
+    ]
+    
+    init_vars = [
+        "y0_init", "y1_init", "y2_init", "y3_init", "y4_init",
+        "y5_init", "y6_init", "y7_init", "y8_init", "y9_init",
+    ]
+    
+    output_vars = ["y0", "y1", "y2", "y3", "y4", "y5", "y6", "y7", "y8", "y9"]
+    default_output = "y1"  # Can compute v = y1 - y2 - y3 from outputs
+
+    def __init__(self, params=None, **kwargs):
+        # Start with default parameters
+        merged_params = self.default_parameters.copy()
         
-        # Get a copy of the default parameters from the class
-        default_params = self.__class__.params.copy()
-        
-        # Update the defaults with any user-provided parameters
+        # Update with user-provided parameters
         if params is not None:
-            default_params.update(params)
-            
-        # Pass the fully merged parameter set to the parent constructor
-        super().__init__(integration=timeIntegration, params=default_params)
-
-        # Provide a safe default init_state if the user didn't set one later
-        if not hasattr(self, "init_state"):
-            self.init_state = np.zeros(10, dtype=np.float64)
-
-    # ---- Default parameters ----
-    params = dict(
-        # Synaptic gains & time constants (Wendling 2002)
-        A=5.0,    a=100.0,
-        B=25.0,   b=25.0,
-        G=15.0,   g=500.0,
-
-        # Connectivity
-        C=135.0,
-        C1=1.0, C2=0.8, C3=0.25, C4=0.25, C5=0.3, C6=0.1, C7=0.8,
-
-        # Sigmoid
-        e0=2.5, v0=6.0, r=0.56,
-
-        # Background input p(t) = p_mean + p_sigma * N(0,1) * sqrt(dt)
-        p_mean=90.0,   # Hz
-        p_sigma=2,  # Hz (先這樣；必要時微調)
-
-        # Integration
-        dt=0.0001,     # 10 kHz（←註解已改正）
-        duration=50.0,
-        seed=None,
-    )
-
-    def run(self, **kwargs):
-        """Override run method to compute derived outputs after integration."""
-        # Call parent run method
-        super().run(**kwargs)
+            merged_params.update(params)
         
-        return self.outputs
-    
-    def storeOutputsAndStates(self, t, variables, append=False):
-        """Override to fix time-output length mismatch by ensuring time vector alignment."""
-        # Store time array with proper IC removal to match state variables
-        if self.startindt > 0:
-            # Remove initial conditions from time vector to match state variables
-            t_trimmed = t[self.startindt:]
-            self.setOutput("t", t_trimmed, append=append, removeICs=False)
-        else:
-            self.setOutput("t", t, append=append, removeICs=False)
+        # Call parent constructor with integration function and merged parameters
+        super().__init__(integration=timeIntegration, params=merged_params, **kwargs)
         
-        self.setStateVariables("t", t)
-        
-        # Store state variables with IC removal as usual
-        for svn, sv in zip(self.state_vars, variables):
-            if svn in self.output_vars:
-                self.setOutput(svn, sv, append=append, removeICs=True)
-            self.setStateVariables(svn, sv)
+        # Initialize state variables
+        for var in self.state_vars:
+            setattr(self, f"{var}_init", self.params.get(f"{var}_init", 0.0))
 
-    def integrate(self, append_outputs=False, simulate_bold=False):
-        """Override integrate to compute derived outputs after integration."""
-        # Call parent integrate method
-        super().integrate(append_outputs=append_outputs, simulate_bold=simulate_bold)
-        
-        # Compute derived outputs v and rate after integration
-        self._compute_derived_outputs()
-
-    def _compute_derived_outputs(self):
-        """Compute v (pyramidal potential) and rate (firing rate) from state variables."""
-        if "y1" in self.outputs and "y2" in self.outputs and "y3" in self.outputs:
-            # Wendling 2002: pyramidal membrane potential = y1 - y2 - y3
-            # (excitatory PSP - slow inhibitory PSP - fast inhibitory PSP)
-            v = self.outputs["y1"] - self.outputs["y2"] - self.outputs["y3"]
-            
-            # Don't remove ICs since y1,y2,y3 already had them removed and now match time vector
-            self.setOutput("v", v, removeICs=False)
-            
-            # Compute firing rate S(v) using Wendling sigmoid
-            rate = 2.0 * self.params["e0"] / (1.0 + np.exp(self.params["r"] * (self.params["v0"] - v)))
-            self.setOutput("rate", rate, removeICs=False)
-
-    # convenience: computed outputs (removed properties to avoid conflict with setOutput)
+        # Initialize state variables
+        for i, var in enumerate(self.state_vars):
+            setattr(self, f"{var}_init", self.params.get(f"{var}_init", 0.0))
 
 
-# ---------- Numba-accelerated core ----------
-
+# Numba-accelerated integration function
 @njit(cache=True, fastmath=True)
 def _sigm(v, e0, v0, r):
-    # Standard JR/Wendling sigmoid -> firing rate (Hz)
+    """Sigmoid function"""
     return 2.0 * e0 / (1.0 + np.exp(r * (v0 - v)))
 
 
 @njit(cache=True, fastmath=True)
 def _integrate_wendling(y0, n_steps, dt,
-                        A,a, B,b, G,g,
-                        C,C1,C2,C3,C4,C5,C6,C7,
-                        e0,v0,r, p_mean, p_sigma):
+                        A, a, B, b, G, g,
+                        C1, C2, C3, C4, C5, C6, C7,
+                        e0, v0, r, p_mean, p_sigma):
+    """Core integration loop"""
     ys = np.zeros((10, n_steps), dtype=np.float64)
     y = y0.copy()
 
     for k in range(n_steps):
-        # State variables following github_wendling.py structure
-        y0_,y1,y2,y3,y4, y5,y6,y7,y8,y9 = y
+        y0_, y1, y2, y3, y4, y5, y6, y7, y8, y9 = y
         
-        # Background input: p(t) in Hz
-        # Gaussian white noise input: p(t) = p_mean + p_sigma * ξ(t) where ξ(t) ~ N(0,1)
-        # For Euler-Maruyama integration of SDEs, the noise term is scaled by sqrt(dt)
-        xi_t = np.random.normal(0.0, 1.0)  # Standard Gaussian random variable ξ(t) ~ N(0,1)
-        p_t = p_mean + p_sigma * xi_t * np.sqrt(dt)  # Proper Gaussian white noise scaling
+        # Background input with noise
+        # p(t) ~ N(p_mean, p_sigma) where both are already scaled by coefMultP
+        p_t = np.random.normal(p_mean, p_sigma)
         
-        # Derivatives following github_wendling.py exactly
+        # Derivatives
         dy0 = y5
-        dy5 = A * a * _sigm(y1-y2-y3, e0, v0, r) - 2.0 * a * y5 - a * a * y0_
+        dy5 = A * a * _sigm(y1 - y2 - y3, e0, v0, r) - 2.0 * a * y5 - a * a * y0_
         
         dy1 = y6
-        dy6 = A * a * (C2 * _sigm(C1 * y0_, e0, v0, r) + p_t) - 2.0 * a * y6 - a * a * y1
+        dy6 = A * a * (p_t + C2 * _sigm(C1 * y0_, e0, v0, r)) - 2.0 * a * y6 - a * a * y1
         
         dy2 = y7
-        dy7 = B * b * (C4 * _sigm(C3 * y0_, e0, v0, r)) - 2.0 * b * y7 - b * b * y2
+        dy7 = B * b * C4 * _sigm(C3 * y0_, e0, v0, r) - 2.0 * b * y7 - b * b * y2
         
         dy3 = y8
-        dy8 = G * g * (C7 * _sigm((C5 * y0_ - C6 * y4), e0, v0, r)) - 2.0 * g * y8 - g * g * y3
+        dy8 = G * g * C7 * _sigm(C5 * y0_ - C6 * y4, e0, v0, r) - 2.0 * g * y8 - g * g * y3
         
         dy4 = y9
-        dy9 = B * b * (_sigm(C3 * y0_, e0, v0, r)) - 2.0 * b * y9 - b * b * y4
+        dy9 = B * b * _sigm(C3 * y0_, e0, v0, r) - 2.0 * b * y9 - b * b * y4
         
         # Euler integration
-        y0_ += dt*dy0; y1 += dt*dy1; y2 += dt*dy2; y3 += dt*dy3; y4 += dt*dy4
-        y5  += dt*dy5; y6 += dt*dy6; y7 += dt*dy7; y8 += dt*dy8; y9 += dt*dy9
-        y[0]=y0_; y[1]=y1; y[2]=y2; y[3]=y3; y[4]=y4; y[5]=y5; y[6]=y6; y[7]=y7; y[8]=y8; y[9]=y9
+        y5 += dt * dy5
+        y6 += dt * dy6
+        y7 += dt * dy7
+        y8 += dt * dy8
+        y9 += dt * dy9
         
+        y0_ += dt * dy0
+        y1  += dt * dy1
+        y2  += dt * dy2
+        y3  += dt * dy3
+        y4  += dt * dy4
         
-        # Store all state variables
+        # Update state vector
+        y[0] = y0_; y[1] = y1; y[2] = y2; y[3] = y3; y[4] = y4
+        y[5] = y5;  y[6] = y6; y[7] = y7; y[8] = y8; y[9] = y9
+        
+        # Store
         for i in range(10):
             ys[i, k] = y[i]
 
@@ -176,14 +137,7 @@ def _integrate_wendling(y0, n_steps, dt,
 
 
 def timeIntegration(params):
-    """
-    Integrates the Wendling model using Euler-Maruyama method for stochastic differential equations.
-    
-    :param params: Parameter dictionary for the model
-    :type params: dict
-    :return: Integrated state variables and derived outputs
-    :rtype: tuple
-    """
+    """Integration function for neurolib Model"""
     dt = params["dt"]
     duration = params["duration"]
     n_steps = int(duration / dt)
@@ -195,23 +149,30 @@ def timeIntegration(params):
     if params.get("seed") is not None:
         np.random.seed(params["seed"])
     
-    # Scale connectivity constants by C (like github version)
-    C1_scaled = params["C1"] * params["C"]
-    C2_scaled = params["C2"] * params["C"]
-    C3_scaled = params["C3"] * params["C"]
-    C4_scaled = params["C4"] * params["C"]
-    C5_scaled = params["C5"] * params["C"]
-    C6_scaled = params["C6"] * params["C"]
-    C7_scaled = params["C7"] * params["C"]
+    # Scale connectivity constants by C
+    C = params["C"]
+    C1 = params["C1_frac"] * C
+    C2 = params["C2_frac"] * C
+    C3 = params["C3_frac"] * C
+    C4 = params["C4_frac"] * C
+    C5 = params["C5_frac"] * C
+    C6 = params["C6_frac"] * C
+    C7 = params["C7_frac"] * C
     
-    # Call the numba-accelerated integration function
+    # Background noise (both mean and std are scaled by coefMultP)
+    p_mean = params["meanP"] * params["coefMultP"]  # 3.0 * 30.0 = 90.0
+    p_sigma = params["sigmaP"] * params["coefMultP"]  # 1.0 * 30.0 = 30.0
+    
+    # Call numba-accelerated integration
     ys = _integrate_wendling(
         y0=y,
-        n_steps=n_steps, dt=params["dt"],
-        A=params["A"], a=params["a"], B=params["B"], b=params["b"], G=params["G"], g=params["g"],
-        C=params["C"], C1=C1_scaled, C2=C2_scaled, C3=C3_scaled, C4=C4_scaled, C5=C5_scaled, C6=C6_scaled, C7=C7_scaled,
+        n_steps=n_steps, dt=dt,
+        A=params["A"], a=params["a"],
+        B=params["B"], b=params["b"],
+        G=params["G"], g=params["g"],
+        C1=C1, C2=C2, C3=C3, C4=C4, C5=C5, C6=C6, C7=C7,
         e0=params["e0"], v0=params["v0"], r=params["r"],
-        p_mean=params["p_mean"], p_sigma=params["p_sigma"],
+        p_mean=p_mean, p_sigma=p_sigma,
     )
 
     # Return time array and state variables

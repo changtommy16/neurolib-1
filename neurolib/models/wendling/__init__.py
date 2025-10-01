@@ -1,1 +1,1 @@
-from .model import WendlingModel   
+from .model import Wendling2005   
