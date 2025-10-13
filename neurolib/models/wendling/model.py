@@ -1,3 +1,5 @@
+import numpy as np
+
 from . import loadDefaultParams as dp
 from . import timeIntegration as ti
 from ..model import Model
@@ -34,8 +36,16 @@ class WendlingModel(Model):
     
     output_vars = ["y0", "y1", "y2", "y3", "y4", "y5", "y6", "y7", "y8", "y9"]
     default_output = "y1"  # Primary output, can compute v_pyr = y1 - y2 - y3
+    
+    # Input interface (similar to Hopf/ALN)
+    input_vars = ["p_ext"]  # External input to pyramidal cells
+    default_input = "p_ext"
+    
+    # BOLD input transform (voltage to firing rate-like signal)
+    # Wendling outputs membrane potential (mV), BOLD expects firing rate-like signal
+    boldInputTransform = lambda self, v: np.maximum(v, 0) * 0.05
 
-    def __init__(self, params=None, Cmat=None, Dmat=None, seed=None, sigmoid_type="wendling2002"):
+    def __init__(self, params=None, Cmat=None, Dmat=None, seed=None, sigmoid_type="wendling2002", random_init=None):
         """
         Initialize Wendling model.
         
@@ -49,12 +59,20 @@ class WendlingModel(Model):
         :type seed: int, optional
         :param sigmoid_type: Sigmoid variant ("wendling2002" or "pcbi2020"), defaults to "wendling2002"
         :type sigmoid_type: str, optional
+        :param random_init: Whether to use random initial conditions. If None, auto-detect (True for multi-node, False for single-node)
+        :type random_init: bool, optional
         """
         
         self.Cmat = Cmat
         self.Dmat = Dmat
         self.seed = seed
         self.sigmoid_type = sigmoid_type
+        
+        # Auto-detect random_init if not specified
+        if random_init is None:
+            # Use random init for multi-node networks, zero init for single node
+            random_init = (Cmat is not None and len(Cmat) > 1)
+        self.random_init = random_init
         
         # Integration function
         integration = ti.timeIntegration
@@ -65,7 +83,8 @@ class WendlingModel(Model):
                 Cmat=self.Cmat, 
                 Dmat=self.Dmat, 
                 seed=self.seed,
-                sigmoid_type=self.sigmoid_type
+                sigmoid_type=self.sigmoid_type,
+                random_init=self.random_init
             )
         
         # Initialize base class
@@ -84,3 +103,21 @@ class WendlingModel(Model):
             return self.y1 - self.y2 - self.y3
         else:
             raise ValueError("Model has not been run yet. Call model.run() first.")
+    
+    def getMaxDelay(self):
+        """
+        Compute maximum delay in the model.
+        
+        Returns the maximum delay due to distance matrix (Dmat).
+        Local delays within the node are determined by time constants.
+        
+        :return: Maximum delay in time steps
+        :rtype: int
+        """
+        # Maximum delay from distance matrix
+        max_dmat_delay = super().getMaxDelay()
+        
+        # Local delays from time constants are small (< 1 ms typically)
+        # Already handled in timeIntegration
+        
+        return int(max_dmat_delay)

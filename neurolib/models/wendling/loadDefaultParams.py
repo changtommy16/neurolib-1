@@ -2,7 +2,44 @@ import numpy as np
 from ...utils.collections import dotdict
 
 
-def loadDefaultParams(Cmat=None, Dmat=None, seed=None, sigmoid_type="wendling2002"):
+def generateRandomICs(N, seed=None):
+    """
+    Generate random initial conditions for Wendling model.
+    
+    Similar to ALN's generateRandomICs() - provides different starting points
+    for each node to break synchronization in whole-brain networks.
+    
+    :param N: Number of nodes
+    :type N: int
+    :param seed: Random seed
+    :type seed: int, optional
+    :return: Tuple of 10 initial condition arrays (N, 1)
+    :rtype: tuple
+    """
+    np.random.seed(seed)
+    
+    # Membrane potentials: small random perturbations around 0
+    # Range based on typical physiological values
+    y0_init = np.random.uniform(-0.5, 0.5, (N, 1))  # mV
+    y1_init = np.random.uniform(-0.5, 0.5, (N, 1))  # mV
+    y2_init = np.random.uniform(-0.5, 0.5, (N, 1))  # mV
+    y3_init = np.random.uniform(-0.5, 0.5, (N, 1))  # mV
+    y4_init = np.random.uniform(-0.5, 0.5, (N, 1))  # mV
+    
+    # Derivatives: small random perturbations near zero
+    y5_init = np.random.uniform(-0.1, 0.1, (N, 1))
+    y6_init = np.random.uniform(-0.1, 0.1, (N, 1))
+    y7_init = np.random.uniform(-0.1, 0.1, (N, 1))
+    y8_init = np.random.uniform(-0.1, 0.1, (N, 1))
+    y9_init = np.random.uniform(-0.1, 0.1, (N, 1))
+    
+    return (
+        y0_init, y1_init, y2_init, y3_init, y4_init,
+        y5_init, y6_init, y7_init, y8_init, y9_init
+    )
+
+
+def loadDefaultParams(Cmat=None, Dmat=None, seed=None, sigmoid_type="wendling2002", random_init=True):
     """Load default parameters for the Wendling Neural Mass Model.
     
     This implements the Wendling-Chauvel model (Wendling et al., 2002)
@@ -24,6 +61,8 @@ def loadDefaultParams(Cmat=None, Dmat=None, seed=None, sigmoid_type="wendling200
     :type seed: int, optional
     :param sigmoid_type: Sigmoid variant ("wendling2002" or "pcbi2020"), defaults to "wendling2002"
     :type sigmoid_type: str, optional
+    :param random_init: Whether to use random initial conditions (True for whole-brain, False for classic waveforms), defaults to True
+    :type random_init: bool, optional
     :return: Dictionary with default parameters
     :rtype: dict
     """
@@ -80,9 +119,12 @@ def loadDefaultParams(Cmat=None, Dmat=None, seed=None, sigmoid_type="wendling200
     params.C6 = 0.1 * 135.0   # C6 = 0.1*C
     params.C7 = 0.8 * 135.0   # C7 = 0.8*C
     
-    # External input - matched to working code
+    # External input parameters
     params.p_mean = 90.0      # Mean input (Hz)
     params.p_sigma = 2.0      # Input noise std (Hz) - for Type 3 SWD
+    
+    # External input (for input interface, similar to Hopf/ALN)
+    params.p_ext = np.zeros((params.N,))  # External input to pyramidal cells (Hz)
     
     # Sigmoid parameters (Wendling 2002 form)
     params.e0 = 2.5   # Half of maximum firing rate (Hz)
@@ -96,16 +138,36 @@ def loadDefaultParams(Cmat=None, Dmat=None, seed=None, sigmoid_type="wendling200
     # Initial conditions
     # ------------------------------------------------------------------------
     
-    # Zero initial conditions (matching original author's implementation)
-    params.y0_init = np.zeros((params.N, 1))
-    params.y1_init = np.zeros((params.N, 1))
-    params.y2_init = np.zeros((params.N, 1))
-    params.y3_init = np.zeros((params.N, 1))
-    params.y4_init = np.zeros((params.N, 1))
-    params.y5_init = np.zeros((params.N, 1))
-    params.y6_init = np.zeros((params.N, 1))
-    params.y7_init = np.zeros((params.N, 1))
-    params.y8_init = np.zeros((params.N, 1))
-    params.y9_init = np.zeros((params.N, 1))
+    if random_init and params.N > 1:
+        # Random initial conditions for whole-brain networks (to break synchronization)
+        # Similar to ALN's approach
+        (
+            y0_init, y1_init, y2_init, y3_init, y4_init,
+            y5_init, y6_init, y7_init, y8_init, y9_init
+        ) = generateRandomICs(params.N, seed)
+        
+        params.y0_init = y0_init
+        params.y1_init = y1_init
+        params.y2_init = y2_init
+        params.y3_init = y3_init
+        params.y4_init = y4_init
+        params.y5_init = y5_init
+        params.y6_init = y6_init
+        params.y7_init = y7_init
+        params.y8_init = y8_init
+        params.y9_init = y9_init
+    else:
+        # Zero initial conditions (for classic waveforms validation)
+        # This matches the original Wendling 2002 paper and equilibrium-driven activities
+        params.y0_init = np.zeros((params.N, 1))
+        params.y1_init = np.zeros((params.N, 1))
+        params.y2_init = np.zeros((params.N, 1))
+        params.y3_init = np.zeros((params.N, 1))
+        params.y4_init = np.zeros((params.N, 1))
+        params.y5_init = np.zeros((params.N, 1))
+        params.y6_init = np.zeros((params.N, 1))
+        params.y7_init = np.zeros((params.N, 1))
+        params.y8_init = np.zeros((params.N, 1))
+        params.y9_init = np.zeros((params.N, 1))
     
     return params
