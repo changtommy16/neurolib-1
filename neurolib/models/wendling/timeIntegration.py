@@ -145,12 +145,26 @@ def timeIntegration(params):
         y0_init_arr[i, 8] = y8_arr[i, startind-1]
         y0_init_arr[i, 9] = y9_arr[i, startind-1]
     
+    # Vectorize parameters (convert scalar to array if needed)
+    # This must be done before calling JIT function to avoid numba issues
+    A_vec = np.atleast_1d(A).astype(np.float64)
+    B_vec = np.atleast_1d(B).astype(np.float64)
+    G_vec = np.atleast_1d(G).astype(np.float64)
+    p_mean_vec = np.atleast_1d(p_mean).astype(np.float64)
+    
+    # If scalar (length 1), expand to N nodes
+    if len(A_vec) == 1 and N > 1:
+        A_vec = np.full(N, A_vec[0], dtype=np.float64)
+        B_vec = np.full(N, B_vec[0], dtype=np.float64)
+        G_vec = np.full(N, G_vec[0], dtype=np.float64)
+        p_mean_vec = np.full(N, p_mean_vec[0], dtype=np.float64)
+    
     # Call unified integration
     result = _integrate_wendling_unified(
         y0_init_arr, n_steps, dt_s, N,
-        A, a_s, B, b_s, G, g_s,
+        A_vec, a_s, B_vec, b_s, G_vec, g_s,
         params["C"], C1, C2, C3, C4, C5, C6, C7,
-        e0, v0, r, p_mean, p_sigma,
+        e0, v0, r, p_mean_vec, p_sigma,
         Cmat_normalized, K_gl, Dmat_ndt, max_global_delay
     )
     
@@ -192,12 +206,14 @@ def _integrate_wendling_unified(y0_arr, n_steps, dt, N,
     """
     Unified Euler-Maruyama integration for Wendling model.
     Handles both single node (N=1) and whole-brain network (N>1).
+    Supports node-specific parameters (A, B, G, p_mean are arrays of length N).
     
     Units: dt in seconds, a/b/g in 1/s (not 1/ms).
     
     Args:
         y0_arr: Initial conditions (N, 10)
         N: Number of nodes
+        A, B, G, p_mean: Arrays of length N (node-specific parameters)
         Cmat: Connectivity matrix (N, N) - set to zeros for single node
         K_gl: Global coupling strength - set to 0 for single node
         max_delay: Maximum delay steps - set to 0 for single node
@@ -219,6 +235,12 @@ def _integrate_wendling_unified(y0_arr, n_steps, dt, N,
         idx = max_delay + k
         
         for node in range(N):
+            # Get node-specific parameters (A, B, G, p_mean are already arrays)
+            A_node = A[node]
+            B_node = B[node]
+            G_node = G[node]
+            p_mean_node = p_mean[node]
+            
             # Current state
             y0_ = ys[node, 0, idx-1]
             y1 = ys[node, 1, idx-1]
@@ -231,9 +253,9 @@ def _integrate_wendling_unified(y0_arr, n_steps, dt, N,
             y8 = ys[node, 8, idx-1]
             y9 = ys[node, 9, idx-1]
             
-            # Noise
+            # Noise (use node-specific p_mean)
             xi_t = np.random.normal(0.0, 1.0)
-            p_t = p_mean + p_sigma * xi_t * np.sqrt(dt)
+            p_t = p_mean_node + p_sigma * xi_t * np.sqrt(dt)
             
             # Coupling input
             coupling_input = 0.0
@@ -244,21 +266,21 @@ def _integrate_wendling_unified(y0_arr, n_steps, dt, N,
                         v_j = ys[j, 1, delay_idx] - ys[j, 2, delay_idx] - ys[j, 3, delay_idx]
                         coupling_input += K_gl * Cmat[node, j] * _sigm_fast(v_j, e0, v0, r)
             
-            # Derivatives (same as simple version, but with coupling)
+            # Derivatives (use node-specific A, B, G)
             dy0 = y5
-            dy5 = A * a * (_sigm_fast(y1 - y2 - y3, e0, v0, r) + coupling_input) - 2.0 * a * y5 - a * a * y0_
+            dy5 = A_node * a * (_sigm_fast(y1 - y2 - y3, e0, v0, r) + coupling_input) - 2.0 * a * y5 - a * a * y0_
             
             dy1 = y6
-            dy6 = A * a * (C2 * _sigm_fast(C1 * y0_, e0, v0, r) + p_t) - 2.0 * a * y6 - a * a * y1
+            dy6 = A_node * a * (C2 * _sigm_fast(C1 * y0_, e0, v0, r) + p_t) - 2.0 * a * y6 - a * a * y1
             
             dy2 = y7
-            dy7 = B * b * (C4 * _sigm_fast(C3 * y0_, e0, v0, r)) - 2.0 * b * y7 - b * b * y2
+            dy7 = B_node * b * (C4 * _sigm_fast(C3 * y0_, e0, v0, r)) - 2.0 * b * y7 - b * b * y2
             
             dy3 = y8
-            dy8 = G * g * (C7 * _sigm_fast((C5 * y0_ - C6 * y4), e0, v0, r)) - 2.0 * g * y8 - g * g * y3
+            dy8 = G_node * g * (C7 * _sigm_fast((C5 * y0_ - C6 * y4), e0, v0, r)) - 2.0 * g * y8 - g * g * y3
             
             dy4 = y9
-            dy9 = B * b * (_sigm_fast(C3 * y0_, e0, v0, r)) - 2.0 * b * y9 - b * b * y4
+            dy9 = B_node * b * (_sigm_fast(C3 * y0_, e0, v0, r)) - 2.0 * b * y9 - b * b * y4
             
             # Euler update
             ys[node, 0, idx] = y0_ + dt * dy0
