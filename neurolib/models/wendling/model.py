@@ -45,7 +45,7 @@ class WendlingModel(Model):
     # Wendling outputs membrane potential (mV), BOLD expects firing rate-like signal
     boldInputTransform = lambda self, v: np.maximum(v, 0) * 0.05
 
-    def __init__(self, params=None, Cmat=None, Dmat=None, seed=None, sigmoid_type="wendling2002", random_init=None):
+    def __init__(self, params=None, Cmat=None, Dmat=None, seed=None, sigmoid_type="wendling2002", random_init=None, heterogeneity=0.0):
         """
         Initialize Wendling model.
         
@@ -61,12 +61,15 @@ class WendlingModel(Model):
         :type sigmoid_type: str, optional
         :param random_init: Whether to use random initial conditions. If None, auto-detect (True for multi-node, False for single-node)
         :type random_init: bool, optional
+        :param heterogeneity: Node heterogeneity level (0.0 = no heterogeneity, 0.1 = 10% variation), defaults to 0.0
+        :type heterogeneity: float, optional
         """
         
         self.Cmat = Cmat
         self.Dmat = Dmat
         self.seed = seed
         self.sigmoid_type = sigmoid_type
+        self.heterogeneity = heterogeneity
         
         # Auto-detect random_init if not specified
         if random_init is None:
@@ -84,7 +87,8 @@ class WendlingModel(Model):
                 Dmat=self.Dmat, 
                 seed=self.seed,
                 sigmoid_type=self.sigmoid_type,
-                random_init=self.random_init
+                random_init=self.random_init,
+                heterogeneity=self.heterogeneity
             )
         
         # Initialize base class

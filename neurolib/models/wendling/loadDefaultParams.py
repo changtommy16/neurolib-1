@@ -39,7 +39,7 @@ def generateRandomICs(N, seed=None):
     )
 
 
-def loadDefaultParams(Cmat=None, Dmat=None, seed=None, sigmoid_type="wendling2002", random_init=True):
+def loadDefaultParams(Cmat=None, Dmat=None, seed=None, sigmoid_type="wendling2002", random_init=True, heterogeneity=0.0):
     """Load default parameters for the Wendling Neural Mass Model.
     
     This implements the Wendling-Chauvel model (Wendling et al., 2002)
@@ -63,6 +63,8 @@ def loadDefaultParams(Cmat=None, Dmat=None, seed=None, sigmoid_type="wendling200
     :type sigmoid_type: str, optional
     :param random_init: Whether to use random initial conditions (True for whole-brain, False for classic waveforms), defaults to True
     :type random_init: bool, optional
+    :param heterogeneity: Node heterogeneity level (0.0 = no heterogeneity, 0.1 = 10% variation, 0.2 = 20% variation), defaults to 0.0
+    :type heterogeneity: float, optional
     :return: Dictionary with default parameters
     :rtype: dict
     """
@@ -99,10 +101,32 @@ def loadDefaultParams(Cmat=None, Dmat=None, seed=None, sigmoid_type="wendling200
     # Local node parameters (Wendling 2002 defaults)
     # ------------------------------------------------------------------------
     
-    # Synaptic gains (mV) - using working validation params
-    params.A = 5.0  # Excitatory gain (validated)
-    params.B = 25.0  # Slow inhibitory gain (validated)
-    params.G = 15.0  # Fast inhibitory gain (validated)
+    # Base parameter values (reference values for single node or heterogeneity)
+    # NOTE: Avoid Type 3 (epileptic SWD) by keeping B < 30 and G > 12
+    A_base = 5.0   # Excitatory gain (mV)
+    B_base = 22.0  # Slow inhibitory gain (mV) - reduced from 25 to avoid epileptic range
+    G_base = 18.0  # Fast inhibitory gain (mV) - increased from 15 to stay in normal range
+    p_mean_base = 90.0  # Mean input (Hz)
+    
+    # Node heterogeneity: vectorize parameters if requested
+    if heterogeneity > 0 and params.N > 1:
+        # Generate node-specific parameters with variation
+        # Using seed for reproducibility
+        np.random.seed(seed)
+        # UPDATED: More symmetric variation for better diversity
+        # While still avoiding epileptic range
+        params.A = A_base * (1 + np.random.uniform(-heterogeneity, heterogeneity, params.N))
+        params.B = B_base * (1 + np.random.uniform(-heterogeneity, heterogeneity, params.N))  # Full range: 15.4-28.6 @ het=0.3
+        params.G = G_base * (1 + np.random.uniform(-heterogeneity, heterogeneity, params.N))  # Full range: 12.6-23.4 @ het=0.3
+        params.p_mean = p_mean_base * (1 + np.random.uniform(-heterogeneity, heterogeneity, params.N))
+        # Reset seed for other random operations
+        np.random.seed(seed)
+    else:
+        # No heterogeneity or single node: use scalar (backward compatible)
+        params.A = A_base
+        params.B = B_base
+        params.G = G_base
+        params.p_mean = p_mean_base
     
     # Time constants (1/ms) - CORRECTED to match Wendling 2002 paper
     params.a = 100.0 / 1000.0  # 0.1 (1/ms) = 100 s^-1 (tau_a = 10 ms)
@@ -119,8 +143,7 @@ def loadDefaultParams(Cmat=None, Dmat=None, seed=None, sigmoid_type="wendling200
     params.C6 = 0.1 * 135.0   # C6 = 0.1*C
     params.C7 = 0.8 * 135.0   # C7 = 0.8*C
     
-    # External input parameters
-    params.p_mean = 90.0      # Mean input (Hz)
+    # External input noise parameter (not vectorized)
     params.p_sigma = 2.0      # Input noise std (Hz) - for Type 3 SWD
     
     # External input (for input interface, similar to Hopf/ALN)
