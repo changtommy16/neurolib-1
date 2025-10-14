@@ -39,7 +39,7 @@ def generateRandomICs(N, seed=None):
     )
 
 
-def loadDefaultParams(Cmat=None, Dmat=None, seed=None, sigmoid_type="wendling2002", random_init=True):
+def loadDefaultParams(Cmat=None, Dmat=None, seed=None, sigmoid_type="wendling2002", random_init=True, heterogeneity=0.0):
     """Load default parameters for the Wendling Neural Mass Model.
     
     This implements the Wendling-Chauvel model (Wendling et al., 2002)
@@ -63,6 +63,8 @@ def loadDefaultParams(Cmat=None, Dmat=None, seed=None, sigmoid_type="wendling200
     :type sigmoid_type: str, optional
     :param random_init: Whether to use random initial conditions (True for whole-brain, False for classic waveforms), defaults to True
     :type random_init: bool, optional
+    :param heterogeneity: Node heterogeneity level (0.0 = no heterogeneity, 0.1 = 10% variation, 0.2 = 20% variation), defaults to 0.0
+    :type heterogeneity: float, optional
     :return: Dictionary with default parameters
     :rtype: dict
     """
@@ -119,8 +121,7 @@ def loadDefaultParams(Cmat=None, Dmat=None, seed=None, sigmoid_type="wendling200
     params.C6 = 0.1 * 135.0   # C6 = 0.1*C
     params.C7 = 0.8 * 135.0   # C7 = 0.8*C
     
-    # External input parameters
-    params.p_mean = 90.0      # Mean input (Hz)
+    # External input noise parameter (not vectorized)
     params.p_sigma = 2.0      # Input noise std (Hz) - for Type 3 SWD
     
     # External input (for input interface, similar to Hopf/ALN)
