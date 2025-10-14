@@ -101,10 +101,32 @@ def loadDefaultParams(Cmat=None, Dmat=None, seed=None, sigmoid_type="wendling200
     # Local node parameters (Wendling 2002 defaults)
     # ------------------------------------------------------------------------
     
-    # Synaptic gains (mV) - using working validation params
-    params.A = 5.0  # Excitatory gain (validated)
-    params.B = 25.0  # Slow inhibitory gain (validated)
-    params.G = 15.0  # Fast inhibitory gain (validated)
+    # Base parameter values (reference values for single node or heterogeneity)
+    # NOTE: Avoid Type 3 (epileptic SWD) by keeping B < 30 and G > 12
+    A_base = 5.0   # Excitatory gain (mV)
+    B_base = 22.0  # Slow inhibitory gain (mV) - reduced from 25 to avoid epileptic range
+    G_base = 18.0  # Fast inhibitory gain (mV) - increased from 15 to stay in normal range
+    p_mean_base = 90.0  # Mean input (Hz)
+    
+    # Node heterogeneity: vectorize parameters if requested
+    if heterogeneity > 0 and params.N > 1:
+        # Generate node-specific parameters with variation
+        # Using seed for reproducibility
+        np.random.seed(seed)
+        # UPDATED: More symmetric variation for better diversity
+        # While still avoiding epileptic range
+        params.A = A_base * (1 + np.random.uniform(-heterogeneity, heterogeneity, params.N))
+        params.B = B_base * (1 + np.random.uniform(-heterogeneity, heterogeneity, params.N))  # Full range: 15.4-28.6 @ het=0.3
+        params.G = G_base * (1 + np.random.uniform(-heterogeneity, heterogeneity, params.N))  # Full range: 12.6-23.4 @ het=0.3
+        params.p_mean = p_mean_base * (1 + np.random.uniform(-heterogeneity, heterogeneity, params.N))
+        # Reset seed for other random operations
+        np.random.seed(seed)
+    else:
+        # No heterogeneity or single node: use scalar (backward compatible)
+        params.A = A_base
+        params.B = B_base
+        params.G = G_base
+        params.p_mean = p_mean_base
     
     # Time constants (1/ms) - CORRECTED to match Wendling 2002 paper
     params.a = 100.0 / 1000.0  # 0.1 (1/ms) = 100 s^-1 (tau_a = 10 ms)
