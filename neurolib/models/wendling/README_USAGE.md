@@ -1,77 +1,108 @@
-# Wendling Model 使用指南
+# Wendling Model Usage Guide
 
-## 📌 基本用法
+## ⚡ Quick Reference
+
+| Parameter | What it does | When to use |
+|-----------|--------------|-------------|
+| `heterogeneity` | 0 = scalar params<br>>0 = vector params + random variation | **Scenario A**: Use 0.3 for automatic diversity<br>**Scenario B**: Use 0.01 as hack to enable manual setting |
+| `random_init` | False = zero initial conditions<br>True = random initial conditions | Use True for multi-node networks |
+| `seed` | Random seed for reproducibility | Set to 42 for consistent results |
+
+**Key insight**: 
+- `heterogeneity` generates initial random variation during model creation
+- **If you DON'T set parameters manually** → The random variation is used (Scenario A)
+- **If you DO set parameters manually** → Your values overwrite the random variation (Scenario B)
+- Once set (either way), parameters stay **fixed** during `model.run()`
+
+---
+
+## 📌 Basic Usage
 
 ```python
 from neurolib.models.wendling import WendlingModel
 import numpy as np
 
-# 创建连接矩阵
+# Create connectivity matrices
 N = 6
-Cmat = np.eye(N)  # 结构连接矩阵
-Dmat = np.zeros((N, N))  # 距离矩阵
+Cmat = np.eye(N)  # Structural connectivity matrix
+Dmat = np.zeros((N, N))  # Distance matrix
 
-# 创建模型
+# Create model
 model = WendlingModel(Cmat=Cmat, Dmat=Dmat)
-model.params['duration'] = 10000  # 10 秒
-model.params['dt'] = 0.1  # 时间步长
-model.params['K_gl'] = 0.15  # 全局耦合强度
+model.params['duration'] = 10000  # 10 seconds
+model.params['dt'] = 0.1  # Time step
+model.params['K_gl'] = 0.15  # Global coupling strength
 
-# 运行仿真
+# Run simulation
 model.run()
 
-# 提取信号
-signals = model.y1 - model.y2 - model.y3  # PSP (金字塔神经元输出)
+# Extract signals
+signals = model.y1 - model.y2 - model.y3  # PSP (pyramidal neuron output)
 ```
 
 ---
 
-## 🎛️ 关键参数说明
+## 🎛️ Key Parameters
 
-### 1. heterogeneity（节点异质性）
+### 1. heterogeneity (Node Heterogeneity)
 
-**作用**：控制节点间参数的随机变异程度
+**Purpose**: Generates random parameter variation during initialization
 
-**取值范围**：0.0 ~ 1.0
-- `0.0` = 无变异，所有节点参数相同
-- `0.1` = 10% 变异
-- `0.3` = 30% 变异（推荐用于全脑网络）
-- `0.5` = 50% 变异
+**What happens**:
+1. When `heterogeneity > 0`: Parameters become vectors with random variation
+2. **If you don't set parameters** → Uses the random values (intended use)
+3. **If you set parameters manually** → Your values overwrite the random values
 
-**重要特性**：
-- ✅ 当 `heterogeneity > 0` 时，B, G, A, p_mean 变成**向量**（每个节点不同）
-- ❌ 当 `heterogeneity = 0` 时，这些参数是**标量**（所有节点相同）
-
-**示例**：
+#### Use Case A: Automatic diversity (INTENDED)
 ```python
-# 无异质性（标量模式）
-model = WendlingModel(Cmat, Dmat, heterogeneity=0.0)
-print(model.params['B'])  # → 22.0 (单个数字)
-
-# 有异质性（向量模式）
-model = WendlingModel(Cmat, Dmat, heterogeneity=0.3)
-print(model.params['B'])  # → [25.3, 18.7, 22.1, ...] (数组)
+# For whole-brain modeling
+model = WendlingModel(Cmat, Dmat, heterogeneity=0.30)
+# → Generates: B = [25.3, 18.7, 22.1, ...] (random)
+# → Don't overwrite! Use these values directly ✅
+model.run()
 ```
+
+#### Use Case B: Manual control (HACK)
+```python
+# For manual type assignment
+model = WendlingModel(Cmat, Dmat, heterogeneity=0.01)
+# → Generates: B = [22.04, 21.85, ...] (random, but we don't want)
+# → Overwrite with exact values ✅
+model.params['B'] = np.array([50, 25, 15, ...])
+# → Now: B = [50, 25, 15, ...] (our values!)
+model.run()
+```
+
+**Value Range**: 0.0 ~ 1.0
+- `0.0` = Scalar mode (cannot set different values per node)
+- `0.01` = Minimal variation (hack to enable vectorization)
+- `0.3` = 30% variation (realistic diversity)
+- `0.5` = 50% variation (high diversity)
+
+**Why is this confusing?**
+- The design mixes two concepts: "vectorization" + "variation"
+- Ideally, there should be a separate `vectorize_params=True` parameter
+- We exploit the side effect for manual control
 
 ---
 
-### 2. random_init（初始条件类型）
+### 2. random_init (Initial Condition Type)
 
-**作用**：控制状态变量的初始值
+**Purpose**: Controls the initial values of state variables
 
-**取值**：`True` 或 `False`
-- `False` = 零初始条件（所有状态从 0 开始）
-- `True` = 随机初始条件（从 random(-0.1, 0.1) 开始）
+**Values**: `True` or `False`
+- `False` = Zero initial conditions (all states start from 0)
+- `True` = Random initial conditions (start from random(-0.1, 0.1))
 
-**使用建议**：
+**Usage Recommendations**:
 
-| 场景 | 推荐值 | 原因 |
-|------|--------|------|
-| Single-node 测试 | `False` | 复现经典 Wendling 2002 波形 |
-| Multi-node 网络 | `True` | 避免某些参数组合衰减成稳态 |
-| 全脑仿真 | `True` | 更接近真实大脑状态 |
+| Scenario | Recommended | Reason |
+|----------|-------------|--------|
+| Single-node testing | `False` | Reproduce classic Wendling 2002 waveforms |
+| Multi-node networks | `True` | Avoid decay to steady state for certain parameter combinations |
+| Whole-brain simulation | `True` | More realistic brain state |
 
-**示例**：
+**Example**:
 ```python
 # Single-node
 model = WendlingModel(Cmat, Dmat, random_init=False)
@@ -82,35 +113,35 @@ model = WendlingModel(Cmat, Dmat, random_init=True)
 
 ---
 
-### 3. seed（随机种子）
+### 3. seed (Random Seed)
 
-**作用**：保证结果可重复
+**Purpose**: Ensures reproducible results
 
 ```python
 model = WendlingModel(Cmat, Dmat, heterogeneity=0.3, seed=42)
-# 每次运行产生相同的随机参数和初始条件
+# Every run produces the same random parameters and initial conditions
 ```
 
 ---
 
-## 🎯 常见使用场景
+## 🎯 Common Use Cases
 
-### 场景 1：Single-node 经典波形复现
+### Scenario 1: Single-node classic waveform reproduction
 
 ```python
-# 复现 Wendling 2002 的 6 种活动类型
+# Reproduce the 6 activity types from Wendling 2002
 Cmat = np.array([[0]])
 Dmat = np.array([[0]])
 
 model = WendlingModel(
     Cmat=Cmat, 
     Dmat=Dmat,
-    heterogeneity=0.0,   # 标量模式
-    random_init=False,   # 零初始条件
+    heterogeneity=0.0,   # Scalar mode
+    random_init=False,   # Zero initial conditions
     seed=42
 )
 
-# 设置 Type3 (SWD) 参数
+# Set Type3 (SWD) parameters
 model.params['B'] = 25
 model.params['G'] = 15
 model.params['A'] = 5
@@ -126,111 +157,170 @@ signal = model.y1[0, :] - model.y2[0, :] - model.y3[0, :]
 
 ---
 
-### 场景 2：Multi-node 手动指定每个节点的类型
+### Scenario 2: Multi-node with manually specified types for each node
 
 ```python
-# 想要为每个节点设置不同的 Wendling type
+# Goal: Set different Wendling types for each node
 N = 6
 NODE_TYPES = ['Type1', 'Type3', 'Type6', 'Type6', 'Type1', 'Type1']
 
 Cmat = np.eye(N)
 Dmat = np.zeros((N, N))
 
-# Hack: 使用很小的 heterogeneity 触发向量模式
+# Hack: Use tiny heterogeneity to trigger vector mode
 model = WendlingModel(
     Cmat=Cmat, 
     Dmat=Dmat,
-    heterogeneity=0.01,  # 触发向量模式
-    random_init=True,    # multi-node 必须用 True
+    heterogeneity=0.01,  # Triggers vector mode (parameters become arrays)
+    random_init=True,    # MUST use True for multi-node
     seed=42
 )
 
-# 手动设置每个节点的参数
+# Check: Parameters are now vectors (but random)
+print(model.params['B'])  # → [22.04, 21.85, 21.85, 21.85, 22.04, 22.04]
+
+# Manually overwrite with exact values for each type
 model.params['B'] = np.array([50, 25, 15, 15, 50, 50])  # Type1, Type3, Type6...
 model.params['G'] = np.array([15, 15, 0, 0, 15, 15])
 model.params['A'] = np.array([5, 5, 5, 5, 5, 5])
 model.params['p_mean'] = np.array([90, 90, 90, 90, 90, 90])
-model.params['p_sigma'] = 2.0  # 标量（所有节点共用）
+model.params['p_sigma'] = 2.0  # Scalar (shared by all nodes)
+
+# Verify: Parameters are now fixed
+print(model.params['B'])  # → [50, 25, 15, 15, 50, 50] ✅
 
 model.params['duration'] = 10000
 model.params['dt'] = 0.1
-model.params['K_gl'] = 0.0  # 或 0.15 用于耦合
+model.params['K_gl'] = 0.0  # or 0.15 for coupling
 
+# Run simulation
 model.run()
+
+# Check again: Parameters stayed fixed!
+print(model.params['B'])  # → [50, 25, 15, 15, 50, 50] ✅ (unchanged)
 ```
+
+**Key takeaway**: 
+- `heterogeneity` only sets the **initial** random values
+- Your manual assignment **overrides** them completely
+- During `model.run()`, parameters **stay fixed** at your values
 
 ---
 
-### 场景 3：全脑网络建模（自动随机参数）
+### Scenario 3: Whole-brain network modeling (automatic random parameters)
+
+**This is the INTENDED use of heterogeneity!**
 
 ```python
-# 80-node 全脑网络
+# 80-node whole-brain network
 N = 80
-Cmat = load_structural_connectivity()  # 真实 SC 矩阵
+Cmat = load_structural_connectivity()  # Real SC matrix
 Dmat = load_distance_matrix()
 
 model = WendlingModel(
     Cmat=Cmat, 
     Dmat=Dmat,
-    heterogeneity=0.30,  # 30% 参数变异
-    random_init=True,    # 随机初始条件
+    heterogeneity=0.30,  # 30% parameter variation
+    random_init=True,    # Random initial conditions
     seed=42
 )
 
-# 不需要手动设置参数，已自动生成
+# ⚠️ IMPORTANT: Do NOT overwrite parameters here!
+# The purpose of heterogeneity is to USE these random values
+# They represent realistic brain diversity
+
+# Check the generated diversity
+print(f"B range: {model.params['B'].min():.1f} - {model.params['B'].max():.1f}")
+# → B range: 15.4 - 28.6 (diverse!)
+
 model.params['duration'] = 10000
 model.params['dt'] = 0.1
-model.params['K_gl'] = 0.15  # 全局耦合
+model.params['K_gl'] = 0.15  # Global coupling strength
 
 model.run()
 
-# 提取所有节点信号
+# Extract signals from all nodes
 signals = model.y1 - model.y2 - model.y3  # shape: (80, 100000)
 ```
 
+**Key difference from Scenario 2**:
+- Scenario 2: Use heterogeneity as a **hack** → overwrite values
+- Scenario 3: Use heterogeneity as **intended** → keep random values
+
 ---
 
-## ⚠️ 重要注意事项
+## 📊 Summary: When is the random variation useful?
 
-### 1. heterogeneity 的双重作用
+| Scenario | heterogeneity | Manual override? | Random variation used? | Purpose |
+|----------|---------------|------------------|------------------------|---------|
+| **Single-node** | 0.0 | Set manually | N/A (scalar mode) | Testing specific types |
+| **Manual types** | 0.01 | ✅ Override | ❌ No (overwritten) | We need vectorization only |
+| **Whole-brain** | 0.30 | ❌ Keep random | ✅ **YES!** | Realistic brain diversity |
+
+**The key logic**:
+- `heterogeneity > 0` always generates random variation during initialization
+- **Without manual override** → Random variation is used (intended for whole-brain)
+- **With manual override** → Your values replace the random variation (hack for manual types)
+
+---
+
+## ⚠️ Important Notes
+
+### 1. heterogeneity has a dual role
 
 ```python
-# heterogeneity 不仅控制变异程度，还决定参数是否向量化！
+# heterogeneity controls both variation AND vectorization!
 
 # heterogeneity = 0
-# → B, G, A, p_mean 是标量
-# → 无法为每个节点设置不同值
+# → B, G, A, p_mean are SCALARS
+# → Cannot set different values for each node
 
 # heterogeneity > 0
-# → B, G, A, p_mean 是向量
-# → 可以手动覆盖为任意值
+# → B, G, A, p_mean are VECTORS
+# → Can manually overwrite with any values
 ```
 
-**Hack 技巧**：如果想手动设置每个节点的参数，但不想要随机变异：
+**Decision flow**:
 ```python
-model = WendlingModel(heterogeneity=0.01, seed=42)  # 很小的变异触发向量模式
-model.params['B'] = np.array([50, 25, 15, ...])    # 手动覆盖为精确值
+model = WendlingModel(heterogeneity=0.01, seed=42)
+# At this point: B = [22.04, 21.85, ...] (random values from heterogeneity)
+
+# Path A: Don't set parameters manually
+model.run()
+# → Uses the random values: B = [22.04, 21.85, ...]
+
+# Path B: Set parameters manually
+model.params['B'] = np.array([50, 25, 15, ...])
+# → Your values overwrite: B = [50, 25, 15, ...]
+model.run()
+# → Uses your values: B = [50, 25, 15, ...]
 ```
+
+**Key points**:
+- ✅ heterogeneity generates initial random values during `__init__()`
+- ✅ If you don't set manually → random values are used
+- ✅ If you set manually → your values overwrite the random values
+- ✅ Once set (either way), parameters stay fixed during `model.run()`
 
 ---
 
-### 2. random_init 对 multi-node 至关重要
+### 2. random_init is critical for multi-node networks
 
 ```python
-# ❌ 错误：multi-node + random_init=False
+# ❌ Wrong: multi-node + random_init=False
 model = WendlingModel(Cmat, Dmat, random_init=False)
 model.params['B'] = np.array([50, 50, 50])  # high-B type
 model.run()
-# → 信号会衰减成水平线！
+# → Signals decay to flat line!
 
-# ✅ 正确：multi-node + random_init=True
+# ✅ Correct: multi-node + random_init=True
 model = WendlingModel(Cmat, Dmat, random_init=True)
 model.params['B'] = np.array([50, 50, 50])
 model.run()
-# → 正常振荡
+# → Normal oscillations
 ```
 
-**原因**：零初始条件 + multi-node + high-B 参数 → 系统陷入稳态吸引子
+**Reason**: Zero initial conditions + multi-node + high-B parameters → System falls into steady-state attractor
 
 ---
 
@@ -252,27 +342,27 @@ model.params['p_sigma'] = np.array([2.0, 30.0, 2.0, ...])  # 不支持
 
 ---
 
-## 📊 参数向量化状态
+## 📊 Parameter Vectorization Status
 
-| 参数 | 是否向量化 | 条件 | 手动设置 |
-|------|------------|------|----------|
-| B | ✅ | heterogeneity > 0 | ✅ 可以 |
-| G | ✅ | heterogeneity > 0 | ✅ 可以 |
-| A | ✅ | heterogeneity > 0 | ✅ 可以 |
-| p_mean | ✅ | heterogeneity > 0 | ✅ 可以 |
-| p_sigma | ❌ | 始终标量 | ❌ 不能 |
-| K_gl | ❌ | 始终标量 | ✅ 可以 |
-| duration | ❌ | 始终标量 | ✅ 可以 |
-| dt | ❌ | 始终标量 | ✅ 可以 |
+| Parameter | Vectorized? | Condition | Manual Override |
+|-----------|-------------|-----------|-----------------|
+| B | ✅ | heterogeneity > 0 | ✅ Yes |
+| G | ✅ | heterogeneity > 0 | ✅ Yes |
+| A | ✅ | heterogeneity > 0 | ✅ Yes |
+| p_mean | ✅ | heterogeneity > 0 | ✅ Yes |
+| p_sigma | ❌ | Always scalar | ❌ No |
+| K_gl | ❌ | Always scalar | ✅ Yes |
+| duration | ❌ | Always scalar | ✅ Yes |
+| dt | ❌ | Always scalar | ✅ Yes |
 
 ---
 
-## 🔧 Wendling 2002 六种活动类型
+## 🔧 Wendling 2002 Six Activity Types
 
-### 标准参数
+### Standard Parameters
 
-| Type | B | G | A | p_mean | p_sigma | 频率 | 描述 |
-|------|---|---|---|--------|---------|------|------|
+| Type | B | G | A | p_mean | p_sigma | Frequency | Description |
+|------|---|---|---|--------|---------|-----------|-------------|
 | Type1 | 50 | 15 | 5 | 90 | 30.0* | 1-7 Hz | Background activity |
 | Type2 | 40 | 15 | 5 | 90 | 30.0* | 1-5 Hz | Sporadic spikes |
 | Type3 | 25 | 15 | 5 | 90 | 2.0 | 3-6 Hz | SWD (epileptic) |
@@ -280,33 +370,46 @@ model.params['p_sigma'] = np.array([2.0, 30.0, 2.0, ...])  # 不支持
 | Type5 | 5 | 25 | 5 | 90 | 30.0* | 10-20 Hz | LVFA |
 | Type6 | 15 | 0 | 5 | 90 | 2.0 | 9-13 Hz | Quasi-sinusoidal |
 
-*注：原始论文使用 p_sigma=30.0，但某些实现中使用 2.0
+*Note: Original paper uses p_sigma=30.0, but some implementations use 2.0
 
 ---
 
-## 📚 相关文档
+## 📚 Related Documentation
 
-- `STANDARD_PARAMETERS.py` - 标准参数定义
-- `HETEROGENEITY_AND_RANDOM_INIT.md` - 详细参数说明
-- Wendling et al. (2002) - 原始论文
-
----
-
-## 🐛 常见问题
-
-### Q1: 为什么我的信号衰减成水平线？
-**A**: Multi-node 网络必须使用 `random_init=True`
-
-### Q2: 为什么我无法为每个节点设置不同的 B 值？
-**A**: 需要设置 `heterogeneity > 0` 来触发向量模式
-
-### Q3: 为什么 Type1 的振幅很小？
-**A**: Type1 需要 `p_sigma=30.0`，但如果其他类型需要 `p_sigma=2.0`，由于 p_sigma 未向量化，只能选择一个值
-
-### Q4: 如何保证结果可重复？
-**A**: 设置 `seed` 参数：`WendlingModel(..., seed=42)`
+- `STANDARD_PARAMETERS.py` - Standard parameter definitions
+- `HETEROGENEITY_AND_RANDOM_INIT.md` - Detailed parameter explanation
+- Wendling et al. (2002) - Original paper
 
 ---
 
-**最后更新**: 2025-10-14  
-**版本**: neurolib wendling model (custom implementation)
+## 🐛 FAQ
+
+### Q1: Why do my signals decay to a flat line?
+**A**: Multi-node networks MUST use `random_init=True`
+
+### Q2: Why can't I set different B values for each node?
+**A**: You need to set `heterogeneity > 0` to trigger vector mode
+
+### Q3: Why is Type1's amplitude so small?
+**A**: Type1 needs `p_sigma=30.0`, but if other types need `p_sigma=2.0`, since p_sigma is not vectorized, you can only choose one value
+
+### Q4: How to ensure reproducible results?
+**A**: Set the `seed` parameter: `WendlingModel(..., seed=42)`
+
+### Q5: Can I fix parameters after setting heterogeneity > 0?
+**A**: **YES!** `heterogeneity` only affects initialization. Your manual values will stay fixed during `model.run()`
+
+### Q6: If I'm going to overwrite the random values, what's the point of heterogeneity?
+**A**: It depends on your use case:
+- **Don't overwrite (whole-brain)**: The random variation IS the point - simulates realistic brain diversity
+- **Do overwrite (manual types)**: The random variation is useless, but we need `heterogeneity>0` to trigger vectorization. It's a hack.
+
+### Q7: When does heterogeneity generate the random values?
+**A**: Only during `__init__()` (model creation). The values are then:
+- Used directly if you don't set parameters manually, OR
+- Overwritten if you do set parameters manually
+
+---
+
+**Last Updated**: 2025-10-14  
+**Version**: neurolib wendling model (custom implementation)
