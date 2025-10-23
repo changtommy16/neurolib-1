@@ -359,18 +359,25 @@ model.params['p_sigma'] = np.array([2.0, 30.0, 2.0, ...])  # 不支持
 
 ## 🔧 Wendling 2002 Six Activity Types
 
-### Standard Parameters
+### Standard Parameters (STANDARD_PARAMETERS.py)
+
+**⚠️ Important Update (2025-10-14)**:  
+All 6 types now use **`p_sigma=2.0`** (verified through single-node testing).  
+This shows intrinsic dynamics without excessive noise.
 
 | Type | B | G | A | p_mean | p_sigma | Frequency | Description |
 |------|---|---|---|--------|---------|-----------|-------------|
-| Type1 | 50 | 15 | 5 | 90 | 30.0* | 1-7 Hz | Background activity |
-| Type2 | 40 | 15 | 5 | 90 | 30.0* | 1-5 Hz | Sporadic spikes |
-| Type3 | 25 | 15 | 5 | 90 | 2.0 | 3-6 Hz | SWD (epileptic) |
-| Type4 | 10 | 15 | 5 | 90 | 30.0* | 8-13 Hz | Alpha rhythm |
-| Type5 | 5 | 25 | 5 | 90 | 30.0* | 10-20 Hz | LVFA |
-| Type6 | 15 | 0 | 5 | 90 | 2.0 | 9-13 Hz | Quasi-sinusoidal |
+| Type1 | 50 | 15 | 5 | 90 | **2.0** | 1-7 Hz | Background activity |
+| Type2 | 40 | 15 | 5 | 90 | **2.0** | 1-5 Hz | Sporadic spikes |
+| Type3 | 25 | 15 | 5 | 90 | **2.0** | 3-6 Hz | SWD (epileptic) |
+| Type4 | 10 | 15 | 5 | 90 | **2.0** | 8-13 Hz | Alpha rhythm |
+| Type5 | 5 | 25 | 5 | 90 | **2.0** | 10-20 Hz | LVFA |
+| Type6 | 15 | 0 | 5 | 90 | **2.0** | 9-13 Hz | Quasi-sinusoidal |
 
-*Note: Original paper uses p_sigma=30.0, but some implementations use 2.0
+**Notes**:
+- Original Wendling 2002 paper suggested different p_sigma values
+- Verified testing shows `p_sigma=2.0` produces correct waveforms for all types
+- See `STANDARD_PARAMETERS.py` for verified parameter sets
 
 ---
 
@@ -390,8 +397,8 @@ model.params['p_sigma'] = np.array([2.0, 30.0, 2.0, ...])  # 不支持
 ### Q2: Why can't I set different B values for each node?
 **A**: You need to set `heterogeneity > 0` to trigger vector mode
 
-### Q3: Why is Type1's amplitude so small?
-**A**: Type1 needs `p_sigma=30.0`, but if other types need `p_sigma=2.0`, since p_sigma is not vectorized, you can only choose one value
+### Q3: Can I mix different activity types in one network?
+**A**: **YES!** All 6 types now use `p_sigma=2.0` (verified), so you can freely mix them. Just set different B and G values for each node.
 
 ### Q4: How to ensure reproducible results?
 **A**: Set the `seed` parameter: `WendlingModel(..., seed=42)`
