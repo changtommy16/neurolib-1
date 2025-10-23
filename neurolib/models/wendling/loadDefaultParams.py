@@ -144,7 +144,7 @@ def loadDefaultParams(Cmat=None, Dmat=None, seed=None, sigmoid_type="wendling200
     params.C7 = 0.8 * 135.0   # C7 = 0.8*C
     
     # External input noise parameter (not vectorized)
-    params.p_sigma = 2.0      # Input noise std (Hz) - for Type 3 SWD
+    params.p_sigma = 30     # Input noise std (Hz) 
     
     # External input (for input interface, similar to Hopf/ALN)
     params.p_ext = np.zeros((params.N,))  # External input to pyramidal cells (Hz)
