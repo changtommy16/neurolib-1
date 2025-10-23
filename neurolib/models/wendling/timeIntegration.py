@@ -255,8 +255,8 @@ def _integrate_wendling_unified(y0_arr, n_steps, dt, N,
             
             # Noise (use node-specific p_mean)
             xi_t = np.random.normal(0.0, 1.0)
-            p_t = p_mean_node + p_sigma * xi_t * np.sqrt(dt)
-            
+            p_t = p_mean_node + p_sigma * xi_t * np.sqrt(dt) #Euler–Maruyama（with sqrt(dt))decreases the amplitude of output. \
+            # if you want exact amplitude (larger) as in some papers, you can remove sqrt(dt).            
             # Coupling input
             coupling_input = 0.0
             for j in range(N):
