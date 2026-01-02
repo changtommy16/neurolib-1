@@ -18,6 +18,19 @@ from . import deapUtils as du
 from . import evolutionaryUtils as eu
 
 
+# Module-level worker function for Windows multiprocessing compatibility
+# (local functions cannot be pickled on Windows spawn mode)
+def _evolution_worker(arg, fn):
+    """
+    Wrapper to get original exception from inner, `fn`, function.
+    """
+    try:
+        return fn(arg)
+    except Exception as e:
+        logging.exception(e)
+        raise
+
+
 class Evolution:
     """Evolutionary parameter optimization. This class helps you to optimize any function or model using an evolutionary algorithm.
     It uses the package `deap` and supports its builtin mating and selection functions as well as custom ones.
@@ -413,17 +426,8 @@ class Evolution:
         toolbox.register("map", pypetEnvironment.run)
         toolbox.register("run_map", pypetEnvironment.run_map)
 
-        def _worker(arg, fn):
-            """
-            Wrapper to get original exception from inner, `fn`, function.
-            """
-            try:
-                return fn(arg)
-            except Exception as e:
-                logging.exception(e)
-                raise
-
-        toolbox.register("evaluate", partial(_worker, fn=evalFunction))
+        # Use module-level _evolution_worker for Windows multiprocessing compatibility
+        toolbox.register("evaluate", partial(_evolution_worker, fn=evalFunction))
 
         # Operator registering
 
